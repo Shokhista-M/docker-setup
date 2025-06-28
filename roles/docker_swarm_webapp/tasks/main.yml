@@ -1,0 +1,102 @@
+---
+- name: Install Docker dependencies
+  dnf:
+    name:
+      - dnf-utils
+      - device-mapper-persistent-data
+      - lvm2
+    state: present
+
+- name: Add Docker CE repo
+  get_url:
+    url: "{{ docker_repo_url }}"
+    dest: /etc/yum.repos.d/docker-ce.repo
+
+- name: Install Docker engine
+  dnf:
+    name: "{{ docker_packages }}"
+    state: present
+
+- name: Enable and start Docker
+  service:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Add current user to docker group
+  user:
+    name: student
+    groups: docker
+    append: yes
+
+- name: Initialize Docker Swarm (on manager)
+  shell: docker swarm init
+  when: inventory_hostname == groups['manager'][0]
+  ignore_errors: true
+  register: swarm_init
+
+- name: Get swarm join-token (manager)
+  shell: docker swarm join-token -q worker
+  when: inventory_hostname == groups['manager'][0]
+  register: worker_token
+
+- name: Join Docker Swarm (on workers)
+  shell: >
+    docker swarm join --token {{ hostvars[groups['manager'][0]].worker_token.stdout }}
+    {{ hostvars[groups['manager'][0]].ansible_default_ipv4.address }}:2377
+  when: inventory_hostname in groups['workers']
+  ignore_errors: true
+- name: create build directory
+  file:
+    path: /tmp/docker_build
+    state: directory
+  when: inventory_hostname == groups['manager'][0]    
+
+- name: Download lab-app.tgz on manager
+  get_url:
+    url: "{{ lab_app_url }}"
+    dest: /tmp/docker_build/lab-app.tgz
+    mode: '0644'  
+  when: inventory_hostname == groups['manager'][0]
+- name: Copy Dockerfile to build directory
+  copy:
+    src: Dockerfile
+    dest: /tmp/docker_build/Dockerfile
+  when: inventory_hostname == groups['manager'][0]
+- name: Verify build context files
+  shell: ls -l /tmp/docker_build/
+  register: build_files
+  when: inventory_hostname == groups['manager'][0]
+
+- debug:
+    var: build_files.stdout_lines
+  when: inventory_hostname == groups['manager'][0]
+
+- name: Build Docker image on manager
+  community.docker.docker_image:
+    name: "{{ web_image_name }}"
+    tag: latest
+    source: build
+    build:
+      path: /tmp/docker_build
+      nocache: true  
+  when: inventory_hostname == groups['manager'][0]
+- name: Create overlay network
+  community.docker.docker_network:
+    name: webnet
+    driver: overlay
+    scope: swarm
+  when: inventory_hostname == groups['manager'][0]
+
+- name: Deploy service to swarm (replicated mode, no compose)
+  community.docker.docker_swarm_service:
+    name: web
+    image: webapp:latest
+    publish:
+      - published_port: 80
+        target_port: 80
+    mode: replicated
+    replicas: 3
+    networks:
+      - webnet
+  when: inventory_hostname == groups['manager'][0]   
