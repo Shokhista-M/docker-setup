@@ -1,0 +1,10 @@
+---
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+docker_repo_url: https://download.docker.com/linux/centos/docker-ce.repo
+web_image_name: webapp
+web_image_tag: latest
+lab_app_url: "https://aws-tc-largeobjects.s3-us-west-2.amazonaws.com/CUR-TF-200-ACACAD/studentdownload/lab-app.tgz"
+lab_app_filename: lab-app.tgz
